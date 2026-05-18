@@ -1,0 +1,732 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Image Grid Splitter</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #0f1117; --surface: #1a1d27; --surface2: #22263a;
+  --border: rgba(255,255,255,0.08); --border2: rgba(255,255,255,0.15);
+  --accent: #4ade80; --accent2: #22c55e;
+  --text: #f0f0f0; --muted: #8b8fa8; --radius: 10px;
+}
+body { font-family: 'DM Sans','Segoe UI',sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; display: flex; flex-direction: column; }
+header { padding: 1.1rem 2rem; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 1rem; background: var(--surface); }
+.logo { width: 30px; height: 30px; background: var(--accent); border-radius: 7px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.logo svg { width: 16px; height: 16px; }
+header h1 { font-size: 16px; font-weight: 600; letter-spacing: -0.02em; }
+#header-info { font-size: 11px; color: var(--muted); margin-left: auto; font-family: monospace; }
+.app { display: grid; grid-template-columns: 290px 1fr; flex: 1; overflow: hidden; height: calc(100vh - 52px); }
+.sidebar { background: var(--surface); border-right: 1px solid var(--border); padding: 1.25rem; display: flex; flex-direction: column; gap: 1.25rem; overflow-y: auto; }
+.section-label { font-size: 10px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); margin-bottom: 0.6rem; }
+.drop-zone { border: 1.5px dashed var(--border2); border-radius: var(--radius); padding: 1.5rem 1rem; text-align: center; cursor: pointer; transition: border-color 0.2s, background 0.2s; background: var(--surface2); }
+.drop-zone:hover, .drop-zone.drag-over { border-color: var(--accent); background: rgba(74,222,128,0.05); }
+.drop-zone svg { opacity: 0.4; margin-bottom: 0.5rem; }
+.drop-zone p { font-size: 12px; color: var(--muted); line-height: 1.5; }
+.drop-zone strong { color: var(--accent); }
+#file-input { display: none; }
+.controls-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.65rem; }
+.control-group { display: flex; flex-direction: column; gap: 5px; }
+.control-group label { font-size: 10px; color: var(--muted); font-weight: 500; letter-spacing: 0.03em; text-transform: uppercase; }
+.control-group input[type=number] { background: var(--surface2); border: 1px solid var(--border2); color: var(--text); border-radius: 7px; padding: 7px 10px; font-size: 15px; font-weight: 500; font-family: monospace; width: 100%; transition: border-color 0.2s; }
+.control-group input[type=number]:focus { outline: none; border-color: var(--accent); }
+.toggle-row { display: flex; align-items: center; justify-content: space-between; padding: 9px 11px; background: var(--surface2); border-radius: 8px; border: 1px solid var(--border); cursor: pointer; }
+.toggle-row span { font-size: 12px; color: var(--muted); }
+.toggle { width: 34px; height: 18px; background: var(--border2); border-radius: 20px; position: relative; transition: background 0.2s; flex-shrink: 0; }
+.toggle.on { background: var(--accent2); }
+.toggle::after { content: ''; position: absolute; width: 12px; height: 12px; border-radius: 50%; background: #fff; top: 3px; left: 3px; transition: left 0.2s; }
+.toggle.on::after { left: 19px; }
+.info-box { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
+.info-row { display: flex; justify-content: space-between; padding: 3px 0; font-size: 11px; }
+.info-row span:first-child { color: var(--muted); }
+.info-row span:last-child { font-family: monospace; font-size: 11px; }
+.btn { width: 100%; padding: 10px; border-radius: 8px; border: none; cursor: pointer; font-size: 13px; font-weight: 600; letter-spacing: 0.01em; transition: opacity 0.15s, transform 0.1s; }
+.btn:active { transform: scale(0.98); }
+.btn:disabled { opacity: 0.35; cursor: not-allowed; }
+.btn-primary { background: var(--accent); color: #0a1f00; }
+.btn-primary:hover:not(:disabled) { opacity: 0.9; }
+.btn-secondary { background: var(--surface2); color: var(--text); border: 1px solid var(--border2); }
+.btn-secondary:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.btn-row { display: flex; gap: 8px; }
+.btn-row .btn { flex: 1; }
+.preview-pane { position: relative; display: flex; align-items: center; justify-content: center; background: #0a0c12; overflow: hidden; }
+.empty-state { text-align: center; opacity: 0.3; }
+.empty-state p { font-size: 13px; color: var(--muted); margin-top: 0.75rem; }
+#canvas-wrap { position: relative; user-select: none; display: none; }
+#base-canvas { display: block; }
+#grid-overlay { position: absolute; top: 0; left: 0; }
+.status-bar { position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%); background: rgba(10,15,20,0.92); border: 1px solid var(--border2); border-radius: 20px; padding: 5px 14px; font-size: 11px; font-family: monospace; color: var(--accent); white-space: nowrap; pointer-events: none; transition: opacity 0.2s; }
+.zoom-controls { position: absolute; top: 14px; right: 14px; display: flex; gap: 5px; }
+.zoom-btn { width: 30px; height: 30px; background: var(--surface); border: 1px solid var(--border2); color: var(--text); border-radius: 7px; cursor: pointer; font-size: 16px; display: flex; align-items: center; justify-content: center; transition: border-color 0.15s; }
+.zoom-btn:hover { border-color: var(--accent); color: var(--accent); }
+.mode-controls { position: absolute; top: 14px; left: 14px; display: flex; gap: 5px; }
+.mode-btn { padding: 5px 12px; background: var(--surface); border: 1px solid var(--border2); color: var(--muted); border-radius: 7px; cursor: pointer; font-size: 11px; font-weight: 600; letter-spacing: 0.03em; transition: all 0.15s; }
+.mode-btn.active { background: rgba(74,222,128,0.12); border-color: var(--accent); color: var(--accent); }
+.progress-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.75); z-index: 100; align-items: center; justify-content: center; }
+.progress-overlay.show { display: flex; }
+.progress-card { background: var(--surface); border: 1px solid var(--border2); border-radius: 14px; padding: 1.75rem; min-width: 260px; text-align: center; }
+.progress-card h3 { font-size: 15px; margin-bottom: 1rem; }
+.progress-bar-wrap { height: 5px; background: var(--surface2); border-radius: 10px; overflow: hidden; margin-bottom: 0.65rem; }
+.progress-bar-fill { height: 100%; background: var(--accent); border-radius: 10px; transition: width 0.1s; width: 0%; }
+.progress-text { font-size: 11px; color: var(--muted); font-family: monospace; }
+.spacer { flex: 1; }
+.tip { font-size: 10px; color: var(--muted); line-height: 1.6; padding: 9px 10px; background: var(--surface2); border-radius: 7px; border: 1px solid var(--border); }
+.tip b { color: var(--accent); font-weight: 500; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <svg viewBox="0 0 24 24" fill="none" stroke="#0a1f00" stroke-width="2.5" stroke-linecap="round">
+      <rect x="3" y="3" width="18" height="18" rx="2"/>
+      <line x1="12" y1="3" x2="12" y2="21"/>
+      <line x1="3" y1="12" x2="21" y2="12"/>
+    </svg>
+  </div>
+  <h1>Image Grid Splitter</h1>
+  <span id="header-info">No image loaded</span>
+</header>
+
+<div class="app">
+  <aside class="sidebar">
+
+    <div>
+      <div class="section-label">Image</div>
+      <div class="drop-zone" id="drop-zone">
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+          <polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+        </svg>
+        <p><strong>Click or drop</strong> image here<br>PNG · JPG · WEBP · GIF · paste</p>
+        <input type="file" id="file-input" accept="image/*">
+      </div>
+    </div>
+
+    <div>
+      <div class="section-label">Grid</div>
+      <div class="controls-grid">
+        <div class="control-group">
+          <label>Rows</label>
+          <input type="number" id="rows" value="4" min="1" max="30">
+        </div>
+        <div class="control-group">
+          <label>Columns</label>
+          <input type="number" id="cols" value="4" min="1" max="30">
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <div class="section-label">Options</div>
+      <div class="toggle-row" id="toggle-numbers">
+        <span>Cell numbers</span>
+        <div class="toggle on" id="toggle-num-ind"></div>
+      </div>
+    </div>
+
+    <div>
+      <div class="section-label">Info</div>
+      <div class="info-box">
+        <div class="info-row"><span>Image</span><span id="info-size">—</span></div>
+        <div class="info-row"><span>Cells</span><span id="info-cells">—</span></div>
+        <div class="info-row"><span>Active line</span><span id="info-hover">—</span></div>
+      </div>
+    </div>
+
+    <div>
+      <div class="tip">
+        <b>Drag lines:</b> hover any grid line (cursor changes), then drag freely.<br>
+        <b>Pan:</b> switch to Pan mode or hold Space + drag.<br>
+        <b>Reset Grid:</b> rebuild even grid from row/col counts.<br>
+        <b>Even:</b> space all lines equally without changing count.
+      </div>
+    </div>
+
+    <div class="spacer"></div>
+
+    <div style="display:flex;flex-direction:column;gap:8px;">
+      <div class="btn-row">
+        <button class="btn btn-secondary" id="btn-reset" disabled>Reset Grid</button>
+        <button class="btn btn-secondary" id="btn-even" disabled>Even</button>
+      </div>
+      <button class="btn btn-primary" id="btn-download" disabled>&#11015; Download ZIP</button>
+    </div>
+
+  </aside>
+
+  <main class="preview-pane" id="preview-pane">
+    <div class="empty-state" id="empty-state">
+      <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="0.8" opacity="0.5">
+        <rect x="3" y="3" width="18" height="18" rx="2"/>
+        <line x1="12" y1="3" x2="12" y2="21" stroke-dasharray="2 2"/>
+        <line x1="3" y1="12" x2="21" y2="12" stroke-dasharray="2 2"/>
+      </svg>
+      <p>Load an image to begin</p>
+    </div>
+
+    <div id="canvas-wrap">
+      <canvas id="base-canvas"></canvas>
+      <canvas id="grid-overlay"></canvas>
+    </div>
+
+    <div class="mode-controls">
+      <div class="mode-btn active" id="mode-line">Lines</div>
+      <div class="mode-btn" id="mode-pan">Pan</div>
+    </div>
+
+    <div class="zoom-controls">
+      <div class="zoom-btn" id="zoom-in">+</div>
+      <div class="zoom-btn" id="zoom-out">&#8722;</div>
+      <div class="zoom-btn" id="zoom-fit" style="font-size:11px;font-weight:700;">FIT</div>
+    </div>
+
+    <div class="status-bar" id="status-bar">Hover a grid line to drag it</div>
+  </main>
+</div>
+
+<div class="progress-overlay" id="progress-overlay">
+  <div class="progress-card">
+    <h3>Slicing images&#8230;</h3>
+    <div class="progress-bar-wrap"><div class="progress-bar-fill" id="progress-fill"></div></div>
+    <div class="progress-text" id="progress-text">0 / 0</div>
+  </div>
+</div>
+
+<script>
+// ── DOM ───────────────────────────────────────────────────────────────────
+const dropZone    = document.getElementById('drop-zone');
+const fileInput   = document.getElementById('file-input');
+const rowsInput   = document.getElementById('rows');
+const colsInput   = document.getElementById('cols');
+const baseCanvas  = document.getElementById('base-canvas');
+const gridOverlay = document.getElementById('grid-overlay');
+const canvasWrap  = document.getElementById('canvas-wrap');
+const emptyState  = document.getElementById('empty-state');
+const statusBar   = document.getElementById('status-bar');
+const btnDownload = document.getElementById('btn-download');
+const btnReset    = document.getElementById('btn-reset');
+const btnEven     = document.getElementById('btn-even');
+const headerInfo  = document.getElementById('header-info');
+const modeLine    = document.getElementById('mode-line');
+const modePan     = document.getElementById('mode-pan');
+const infoHover   = document.getElementById('info-hover');
+const toggleNumRow= document.getElementById('toggle-numbers');
+const toggleNumInd= document.getElementById('toggle-num-ind');
+
+// ── State ─────────────────────────────────────────────────────────────────
+let img = null;
+let scale = 1;
+let showNumbers = true;
+let mode = 'lines'; // 'lines' | 'pan'
+let spaceHeld = false;
+
+// Grid lines as fractions [0..1] of native image dimension (borders excluded)
+let vLines = []; // vertical cuts (x positions)
+let hLines = []; // horizontal cuts (y positions)
+
+// Drag state
+const HIT_PX = 7; // hit zone in canvas pixels
+let dragAxis  = null; // 'v' | 'h'
+let dragIdx   = -1;
+let isDragging = false;
+
+// Hover state
+let hoverAxis = null;
+let hoverIdx  = -1;
+
+// Pan state
+let isPanning = false;
+let panOffset = { x: 0, y: 0 };
+let panLast   = { x: 0, y: 0 };
+
+// ── Grid helpers ──────────────────────────────────────────────────────────
+function getRows() { return Math.max(1, parseInt(rowsInput.value) || 1); }
+function getCols() { return Math.max(1, parseInt(colsInput.value) || 1); }
+
+function buildEvenGrid() {
+  const rows = getRows(), cols = getCols();
+  vLines = [];
+  hLines = [];
+  for (let c = 1; c < cols; c++) vLines.push(c / cols);
+  for (let r = 1; r < rows; r++) hLines.push(r / rows);
+}
+
+function spaceLines() {
+  // redistribute existing lines evenly without changing count
+  const vc = vLines.length, hc = hLines.length;
+  vLines = [];
+  hLines = [];
+  for (let i = 1; i <= vc; i++) vLines.push(i / (vc + 1));
+  for (let i = 1; i <= hc; i++) hLines.push(i / (hc + 1));
+}
+
+function fracToCanvas(f, axis) {
+  return f * (axis === 'v' ? baseCanvas.width : baseCanvas.height);
+}
+
+function canvasToFrac(px, axis) {
+  const sz = axis === 'v' ? baseCanvas.width : baseCanvas.height;
+  return Math.max(0.001, Math.min(0.999, px / sz));
+}
+
+function findNearLine(mx, my) {
+  let bestAxis = null, bestIdx = -1, bestDist = HIT_PX + 1;
+  vLines.forEach((f, i) => {
+    const d = Math.abs(mx - fracToCanvas(f, 'v'));
+    if (d < bestDist) { bestDist = d; bestAxis = 'v'; bestIdx = i; }
+  });
+  hLines.forEach((f, i) => {
+    const d = Math.abs(my - fracToCanvas(f, 'h'));
+    if (d < bestDist) { bestDist = d; bestAxis = 'h'; bestIdx = i; }
+  });
+  return bestDist <= HIT_PX ? { axis: bestAxis, idx: bestIdx } : null;
+}
+
+function mouseOnCanvas(e) {
+  const rect = gridOverlay.getBoundingClientRect();
+  const src  = e.touches ? e.touches[0] : e;
+  return { x: src.clientX - rect.left, y: src.clientY - rect.top };
+}
+
+// ── Rendering ─────────────────────────────────────────────────────────────
+function drawBase() {
+  if (!img) return;
+  const w = Math.round(img.naturalWidth  * scale);
+  const h = Math.round(img.naturalHeight * scale);
+  baseCanvas.width  = w; baseCanvas.height  = h;
+  gridOverlay.width = w; gridOverlay.height = h;
+  baseCanvas.getContext('2d').drawImage(img, 0, 0, w, h);
+  applyPan();
+  drawGrid();
+}
+
+function drawGrid() {
+  if (!img) return;
+  const w = baseCanvas.width, h = baseCanvas.height;
+  const ctx = gridOverlay.getContext('2d');
+  ctx.clearRect(0, 0, w, h);
+
+  // ── cell number labels ──
+  if (showNumbers) {
+    const xs = [0, ...vLines.map(f => f * w), w];
+    const ys = [0, ...hLines.map(f => f * h), h];
+    const nc = xs.length - 1, nr = ys.length - 1;
+    const minCell = Math.min(w / nc, h / nr);
+    const fs = Math.max(8, Math.min(13, minCell * 0.14));
+    ctx.font = `600 ${fs}px monospace`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    let n = 1;
+    for (let r = 0; r < nr; r++) {
+      for (let c = 0; c < nc; c++) {
+        const cx = (xs[c] + xs[c + 1]) / 2;
+        const cy = (ys[r] + ys[r + 1]) / 2;
+        const label = String(n++);
+        const tw = ctx.measureText(label).width;
+        ctx.fillStyle = 'rgba(0,0,0,0.48)';
+        ctx.fillRect(cx - tw / 2 - 3, cy - fs / 2 - 1, tw + 6, fs + 2);
+        ctx.fillStyle = 'rgba(74,222,128,0.9)';
+        ctx.fillText(label, cx, cy);
+      }
+    }
+  }
+
+  // ── vertical lines ──
+  vLines.forEach((f, i) => {
+    const x = f * w;
+    const isActive = (hoverAxis === 'v' && hoverIdx === i) || (dragAxis === 'v' && dragIdx === i);
+    ctx.save();
+    if (isActive) {
+      // bright white line while active
+      ctx.strokeStyle = isDragging ? 'rgba(255,255,255,0.95)' : 'rgba(255,255,255,0.8)';
+      ctx.lineWidth = 2;
+      ctx.setLineDash(isDragging ? [] : [5, 3]);
+      // glow effect via shadow
+      ctx.shadowColor = 'rgba(74,222,128,0.6)';
+      ctx.shadowBlur  = 6;
+    } else {
+      ctx.strokeStyle = 'rgba(74,222,128,0.82)';
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([]);
+    }
+    ctx.beginPath();
+    ctx.moveTo(x, 0); ctx.lineTo(x, h);
+    ctx.stroke();
+    ctx.restore();
+
+    // drag handle dot at midpoint
+    if (isActive) {
+      ctx.save();
+      ctx.shadowColor = 'rgba(74,222,128,0.8)';
+      ctx.shadowBlur  = 8;
+      ctx.fillStyle = isDragging ? '#ffffff' : '#4ade80';
+      ctx.beginPath();
+      ctx.arc(x, h / 2, 5.5, 0, Math.PI * 2);
+      ctx.fill();
+      // pixel position label
+      const px = Math.round(f * img.naturalWidth);
+      ctx.shadowBlur = 0;
+      ctx.font = '500 10px monospace';
+      ctx.textAlign = 'center';
+      const lw = ctx.measureText(px + 'px').width;
+      ctx.fillStyle = 'rgba(0,0,0,0.65)';
+      ctx.fillRect(x - lw / 2 - 4, h / 2 - 22, lw + 8, 14);
+      ctx.fillStyle = '#4ade80';
+      ctx.fillText(px + 'px', x, h / 2 - 15);
+      ctx.restore();
+    }
+  });
+
+  // ── horizontal lines ──
+  hLines.forEach((f, i) => {
+    const y = f * h;
+    const isActive = (hoverAxis === 'h' && hoverIdx === i) || (dragAxis === 'h' && dragIdx === i);
+    ctx.save();
+    if (isActive) {
+      ctx.strokeStyle = isDragging ? 'rgba(255,255,255,0.95)' : 'rgba(255,255,255,0.8)';
+      ctx.lineWidth = 2;
+      ctx.setLineDash(isDragging ? [] : [5, 3]);
+      ctx.shadowColor = 'rgba(74,222,128,0.6)';
+      ctx.shadowBlur  = 6;
+    } else {
+      ctx.strokeStyle = 'rgba(74,222,128,0.82)';
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([]);
+    }
+    ctx.beginPath();
+    ctx.moveTo(0, y); ctx.lineTo(w, y);
+    ctx.stroke();
+    ctx.restore();
+
+    if (isActive) {
+      ctx.save();
+      ctx.shadowColor = 'rgba(74,222,128,0.8)';
+      ctx.shadowBlur  = 8;
+      ctx.fillStyle = isDragging ? '#ffffff' : '#4ade80';
+      ctx.beginPath();
+      ctx.arc(w / 2, y, 5.5, 0, Math.PI * 2);
+      ctx.fill();
+      const px = Math.round(f * img.naturalHeight);
+      ctx.shadowBlur = 0;
+      ctx.font = '500 10px monospace';
+      ctx.textAlign = 'left';
+      const lw = ctx.measureText(px + 'px').width;
+      ctx.fillStyle = 'rgba(0,0,0,0.65)';
+      ctx.fillRect(w / 2 + 10, y - 7, lw + 8, 14);
+      ctx.fillStyle = '#4ade80';
+      ctx.fillText(px + 'px', w / 2 + 14, y + 4);
+      ctx.restore();
+    }
+  });
+
+  // ── border ──
+  ctx.setLineDash([]);
+  ctx.strokeStyle = 'rgba(74,222,128,0.4)';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(0.5, 0.5, w - 1, h - 1);
+
+  updateInfo();
+}
+
+function updateInfo() {
+  if (!img) return;
+  const c = vLines.length + 1, r = hLines.length + 1;
+  document.getElementById('info-size').textContent  = `${img.naturalWidth}×${img.naturalHeight}`;
+  document.getElementById('info-cells').textContent = `${r}×${c} = ${r * c}`;
+}
+
+function applyPan() {
+  canvasWrap.style.transform = `translate(${panOffset.x}px, ${panOffset.y}px)`;
+}
+
+function fitToScreen() {
+  if (!img) return;
+  const pane = document.getElementById('preview-pane');
+  const pw = pane.clientWidth - 40, ph = pane.clientHeight - 40;
+  scale = Math.min(pw / img.naturalWidth, ph / img.naturalHeight, 1);
+  panOffset = { x: 0, y: 0 };
+  drawBase();
+}
+
+// ── Image loading ─────────────────────────────────────────────────────────
+dropZone.addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', e => { if (e.target.files[0]) loadImage(e.target.files[0]); });
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+dropZone.addEventListener('drop', e => {
+  e.preventDefault(); dropZone.classList.remove('drag-over');
+  if (e.dataTransfer.files[0]) loadImage(e.dataTransfer.files[0]);
+});
+document.addEventListener('paste', e => {
+  const item = [...e.clipboardData.items].find(i => i.type.startsWith('image'));
+  if (item) loadImage(item.getAsFile());
+});
+
+function loadImage(file) {
+  const reader = new FileReader();
+  reader.onload = ev => {
+    const image = new Image();
+    image.onload = () => {
+      img = image;
+      panOffset = { x: 0, y: 0 };
+      buildEvenGrid();
+      fitToScreen();
+      emptyState.style.display = 'none';
+      canvasWrap.style.display = 'block';
+      btnDownload.disabled = false;
+      btnReset.disabled    = false;
+      btnEven.disabled     = false;
+      headerInfo.textContent = `${file.name}  ${img.naturalWidth}×${img.naturalHeight}px`;
+      statusBar.textContent  = 'Hover a grid line to drag it';
+    };
+    image.src = ev.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+// ── Mode ──────────────────────────────────────────────────────────────────
+function setMode(m) {
+  mode = m;
+  modeLine.classList.toggle('active', m === 'lines');
+  modePan.classList.toggle('active',  m === 'pan');
+  if (m === 'pan') {
+    gridOverlay.style.cursor = 'grab';
+    statusBar.textContent = 'Drag to pan image';
+  } else {
+    gridOverlay.style.cursor = 'default';
+    statusBar.textContent = 'Hover a grid line to drag it';
+  }
+}
+modeLine.addEventListener('click', () => setMode('lines'));
+modePan.addEventListener('click',  () => setMode('pan'));
+
+// Space = temporary pan mode
+window.addEventListener('keydown', e => {
+  if (e.code === 'Space' && !spaceHeld && mode === 'lines') {
+    spaceHeld = true;
+    gridOverlay.style.cursor = 'grab';
+    e.preventDefault();
+  }
+});
+window.addEventListener('keyup', e => {
+  if (e.code === 'Space') {
+    spaceHeld = false;
+    if (!isPanning) gridOverlay.style.cursor = 'default';
+    isPanning = false;
+  }
+});
+
+// ── Toggles ───────────────────────────────────────────────────────────────
+toggleNumRow.addEventListener('click', () => {
+  showNumbers = !showNumbers;
+  toggleNumInd.classList.toggle('on', showNumbers);
+  drawGrid();
+});
+
+rowsInput.addEventListener('input', () => { buildEvenGrid(); drawGrid(); });
+colsInput.addEventListener('input', () => { buildEvenGrid(); drawGrid(); });
+
+btnReset.addEventListener('click', () => { buildEvenGrid(); drawGrid(); });
+btnEven.addEventListener('click',  () => { spaceLines();    drawGrid(); });
+
+// ── Zoom ──────────────────────────────────────────────────────────────────
+document.getElementById('zoom-in').addEventListener('click',  () => { scale = Math.min(scale * 1.25, 8); drawBase(); });
+document.getElementById('zoom-out').addEventListener('click', () => { scale = Math.max(scale / 1.25, 0.03); drawBase(); });
+document.getElementById('zoom-fit').addEventListener('click', fitToScreen);
+
+// ── Mouse: line dragging ──────────────────────────────────────────────────
+gridOverlay.addEventListener('mousemove', e => {
+  if (!img) return;
+  const { x, y } = mouseOnCanvas(e);
+  const panActive = mode === 'pan' || spaceHeld;
+
+  // ── panning ──
+  if (isPanning) {
+    const dx = e.clientX - panLast.x;
+    const dy = e.clientY - panLast.y;
+    panOffset.x += dx; panOffset.y += dy;
+    panLast = { x: e.clientX, y: e.clientY };
+    applyPan();
+    return;
+  }
+
+  if (panActive) return;
+
+  // ── line dragging ──
+  if (isDragging) {
+    if (dragAxis === 'v') {
+      vLines[dragIdx] = canvasToFrac(x, 'v');
+      vLines.sort((a, b) => a - b);
+      // dragIdx may shift after sort — find the one closest to x
+      const targetFrac = canvasToFrac(x, 'v');
+      dragIdx = vLines.reduce((bi, f, i) => Math.abs(f - targetFrac) < Math.abs(vLines[bi] - targetFrac) ? i : bi, dragIdx);
+      const px = Math.round(vLines[dragIdx] * img.naturalWidth);
+      statusBar.textContent = `Vertical line → ${px}px`;
+      infoHover.textContent = `V-line ${dragIdx + 1} @ ${px}px`;
+    } else {
+      hLines[dragIdx] = canvasToFrac(y, 'h');
+      hLines.sort((a, b) => a - b);
+      const targetFrac = canvasToFrac(y, 'h');
+      dragIdx = hLines.reduce((bi, f, i) => Math.abs(f - targetFrac) < Math.abs(hLines[bi] - targetFrac) ? i : bi, dragIdx);
+      const px = Math.round(hLines[dragIdx] * img.naturalHeight);
+      statusBar.textContent = `Horizontal line → ${px}px`;
+      infoHover.textContent = `H-line ${dragIdx + 1} @ ${px}px`;
+    }
+    drawGrid();
+    return;
+  }
+
+  // ── hover detection ──
+  const hit = findNearLine(x, y);
+  const prevAxis = hoverAxis, prevIdx = hoverIdx;
+  hoverAxis = hit ? hit.axis : null;
+  hoverIdx  = hit ? hit.idx  : -1;
+
+  if (hit) {
+    gridOverlay.style.cursor = hit.axis === 'v' ? 'ew-resize' : 'ns-resize';
+    const f  = hit.axis === 'v' ? vLines[hit.idx] : hLines[hit.idx];
+    const px = Math.round(f * (hit.axis === 'v' ? img.naturalWidth : img.naturalHeight));
+    statusBar.textContent = `${hit.axis === 'v' ? 'Vertical' : 'Horizontal'} line ${hit.idx + 1} — ${px}px · drag to move`;
+    infoHover.textContent = `${hit.axis === 'v' ? 'V' : 'H'}-line ${hit.idx + 1} @ ${px}px`;
+  } else {
+    gridOverlay.style.cursor = 'default';
+    if (prevAxis !== null) {
+      statusBar.textContent = 'Hover a grid line to drag it';
+      infoHover.textContent = '—';
+    }
+  }
+
+  if (prevAxis !== hoverAxis || prevIdx !== hoverIdx) drawGrid();
+});
+
+gridOverlay.addEventListener('mousedown', e => {
+  if (!img) return;
+  const panActive = mode === 'pan' || spaceHeld;
+
+  if (panActive) {
+    isPanning = true;
+    panLast = { x: e.clientX, y: e.clientY };
+    gridOverlay.style.cursor = 'grabbing';
+    e.preventDefault();
+    return;
+  }
+
+  const { x, y } = mouseOnCanvas(e);
+  const hit = findNearLine(x, y);
+  if (hit) {
+    isDragging = true;
+    dragAxis   = hit.axis;
+    dragIdx    = hit.idx;
+    gridOverlay.style.cursor = hit.axis === 'v' ? 'ew-resize' : 'ns-resize';
+    e.preventDefault();
+  }
+});
+
+window.addEventListener('mouseup', () => {
+  if (isDragging) {
+    isDragging = false; dragAxis = null; dragIdx = -1;
+    statusBar.textContent = 'Hover a grid line to drag it';
+    infoHover.textContent = '—';
+    drawGrid();
+  }
+  if (isPanning) {
+    isPanning = false;
+    gridOverlay.style.cursor = spaceHeld ? 'grab' : (mode === 'pan' ? 'grab' : 'default');
+  }
+});
+
+gridOverlay.addEventListener('mouseleave', () => {
+  if (!isDragging && hoverAxis !== null) {
+    hoverAxis = null; hoverIdx = -1;
+    gridOverlay.style.cursor = 'default';
+    infoHover.textContent = '—';
+    drawGrid();
+  }
+});
+
+// ── Touch support ─────────────────────────────────────────────────────────
+gridOverlay.addEventListener('touchstart', e => {
+  if (!img) return;
+  const { x, y } = mouseOnCanvas(e);
+  const hit = findNearLine(x, y);
+  if (hit) {
+    isDragging = true;
+    dragAxis = hit.axis; dragIdx = hit.idx;
+    hoverAxis = hit.axis; hoverIdx = hit.idx;
+    e.preventDefault();
+  }
+}, { passive: false });
+
+gridOverlay.addEventListener('touchmove', e => {
+  if (!isDragging) return;
+  const { x, y } = mouseOnCanvas(e);
+  if (dragAxis === 'v') { vLines[dragIdx] = canvasToFrac(x, 'v'); vLines.sort((a, b) => a - b); }
+  else { hLines[dragIdx] = canvasToFrac(y, 'h'); hLines.sort((a, b) => a - b); }
+  drawGrid();
+  e.preventDefault();
+}, { passive: false });
+
+gridOverlay.addEventListener('touchend', () => {
+  isDragging = false; dragAxis = null; dragIdx = -1;
+  hoverAxis = null; hoverIdx = -1;
+  drawGrid();
+});
+
+// ── Download ZIP ──────────────────────────────────────────────────────────
+btnDownload.addEventListener('click', async () => {
+  if (!img) return;
+
+  const iw = img.naturalWidth, ih = img.naturalHeight;
+  // Cut positions in native pixels
+  const xs = [0, ...vLines.map(f => f * iw), iw];
+  const ys = [0, ...hLines.map(f => f * ih), ih];
+  const nc = xs.length - 1, nr = ys.length - 1;
+  const total = nc * nr;
+
+  const overlay = document.getElementById('progress-overlay');
+  const fill    = document.getElementById('progress-fill');
+  const ptext   = document.getElementById('progress-text');
+  overlay.classList.add('show');
+  fill.style.width = '0%';
+
+  const zip = new JSZip();
+  const off = document.createElement('canvas');
+  const ctx = off.getContext('2d');
+  let done = 0;
+
+  for (let r = 0; r < nr; r++) {
+    for (let c = 0; c < nc; c++) {
+      const sx = xs[c], sy = ys[r];
+      const sw = Math.round(xs[c + 1] - xs[c]);
+      const sh = Math.round(ys[r + 1] - ys[r]);
+      off.width = sw; off.height = sh;
+      ctx.clearRect(0, 0, sw, sh);
+      ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
+
+      const n    = r * nc + c + 1;
+      const blob = await new Promise(res => off.toBlob(res, 'image/png'));
+      zip.file(`cell_r${r + 1}_c${c + 1}_${String(n).padStart(3, '0')}.png`, blob);
+
+      done++;
+      fill.style.width = Math.round(done / total * 100) + '%';
+      ptext.textContent = `${done} / ${total}`;
+      await new Promise(r2 => setTimeout(r2, 0));
+    }
+  }
+
+  const zipBlob = await zip.generateAsync({ type: 'blob' });
+  const url = URL.createObjectURL(zipBlob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `split_${nr}x${nc}.zip`; a.click();
+  URL.revokeObjectURL(url);
+  overlay.classList.remove('show');
+});
+
+// ── Resize ────────────────────────────────────────────────────────────────
+window.addEventListener('resize', () => { if (img) fitToScreen(); });
+</script>
+</body>
+</html>
